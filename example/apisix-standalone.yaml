@@ -1,0 +1,91 @@
+routes:
+  # Public route - no authentication required
+  -
+    id: 1
+    uri: /public
+    upstream:
+        nodes:
+            "web1:80": 1
+        type: roundrobin
+    plugins:
+      response-rewrite:
+        body: "This is a public endpoint - no authentication required"
+ # PCI Tokenization Plugin Test Routes
+  -
+    id: test-tokenization
+    uri: /plugin-test/*
+    methods: ["POST"]
+    upstream:
+        nodes:
+            "host.docker.internal:3000": 1  # Assuming the upstream service is running on this localhost and 3000 else replace with web1:80
+        type: roundrobin
+    plugins:
+      proxy-rewrite:
+        regex_uri: ["^/plugin-test/(.*)", "/$1"]
+      pci-tokenization-plugin:
+        intercept_path_pattern_list:
+          - "/plugin-test/test1"
+        intercept_object_key: "anyObject"
+        token_service_endpoint: "https://consumerprods-pci-token.core.qa.demo.com/api/v1/edge/tokenize"
+        token_service_timeout: 5000
+        has_tenant: true
+        has_tenant_guid: false
+        tenant_information_location: "headers"
+        tenant_information_reference: "x-tenant-id"
+
+  -
+    id: test-tokenization-with-tenant-guid
+    uri: /plugin-test/*
+    methods: ["POST"]
+    upstream:
+        nodes:
+            "web1:80": 1
+        type: roundrobin
+    plugins:
+      pci-tokenization-plugin:
+        intercept_path_pattern_list:
+          - "/plugin-test/test2"
+          - "/plugin-test/test3"
+        intercept_object_key: "testObject"
+        token_service_endpoint: "https://consumerprods-pci-token.core.qa.demo.com/api/v1/edge/tokenize"
+        token_service_timeout: 3000
+        has_tenant_guid: true
+        has_tenant: false
+        tenant_guid_resolver_url: "https://tenant-resolver.example.com/getTenant/"
+        tenant_guid_resolver_method: "GET"
+        tenant_information_location: "headers"
+        tenant_information_reference: "x-tenant-id"
+      response-rewrite:
+        body: "Nested card tokenization processed"
+
+  -
+    id: 3
+    uri: /api/*
+    upstream:
+        nodes:
+            "web1:80": 1
+        type: roundrobin
+    plugins:
+      openid-connect-multi-realm:
+        enable: true
+        _meta:
+          disable: false
+        realms:
+        - client_id: gc-stage-gateway-new
+          client_secret: dXHYoPXXGI0ZlEjyYtfqyGPOg9H2jRAA
+          discovery: "https://iam.pp.demo.com/realms/gc-stage/.well-known/openid-configuration"
+          introspection_endpoint: "https://iam.pp.demo.com/realms/gc-stage/protocol/openid-connect/token/introspect"
+          introspection_endpoint_auth_method: client_secret_basic
+          realm: gc-stage
+          bearer_only: true
+          unauth_action: "deny"
+        - client_id: gc-dev-gateway
+          client_secret: 0DiJRnZ2gxBJYXLlvyXpoehlVeKTkcqU
+          discovery: "https://iam.pp.demo.com/realms/gc-dev/.well-known/openid-configuration"
+          introspection_endpoint: "https://iam.pp.demo.com/realms/gc-dev/protocol/openid-connect/token/introspect"
+          introspection_endpoint_auth_method: client_secret_basic
+          realm: gc-dev
+          bearer_only: true
+          unauth_action: "deny"
+
+#END

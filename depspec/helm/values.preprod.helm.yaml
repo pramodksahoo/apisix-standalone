@@ -1,0 +1,663 @@
+# APISIX Standalone - Pre-production Environment Configuration
+# This values file configures APISIX for AWS EKS deployment in standalone mode
+
+# Environment Configuration
+environment: preprod
+namespace: apisix-preprod
+
+# AWS Configuration
+aws:
+  region: us-east-1
+  accountId: ""  # Will be set by CI/CD pipeline
+
+# Application Configuration
+app:
+  name: apisix-gateway
+  version: "3.8.0"
+
+# Service Account
+serviceAccount:
+  create: true
+  automount: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/apisix-preprod-service-role
+  name: ""
+
+# Deployment Configuration
+deployment:
+  replicas: 2
+  
+  image:
+    repository: ""  # Will be set by CI/CD pipeline (ECR registry)
+    tag: "latest"   # Will be set by CI/CD pipeline
+    pullPolicy: Always
+  
+  imagePullSecrets: []
+  
+  ports:
+    http: 9080
+    https: 9443
+    admin: 9180
+  
+  # Security Context
+  podSecurityContext:
+    fsGroup: 2000
+  
+  securityContext:
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 1000
+  
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  
+  # Health checks
+  livenessProbe:
+    httpGet:
+      path: /apisix/admin/status
+      port: 9180
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  
+  readinessProbe:
+    httpGet:
+      path: /apisix/admin/status
+      port: 9180
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Service Configuration
+service:
+  type: ClusterIP
+  annotations: {}
+  
+  http:
+    port: 9080
+    targetPort: 9080
+  
+  https:
+    port: 9443
+    targetPort: 9443
+  
+  admin:
+    port: 9180
+    targetPort: 9180
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:YOUR_ACCOUNT:certificate/YOUR_CERT_ID"
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+  
+  hosts:
+    - host: apisix-preprod.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: apisix-gateway
+              port: 9080
+  
+  tls: []
+
+# ConfigMap Configuration
+configMap:
+  adminKey: apisix-preprod-admin-key-2025
+  plugins:
+    - datadome-protect
+    - jwt-header-plugin
+    - pci-tokenization-plugin
+    - hmac-auth-simple
+    - openid-connect-multi-realm
+    - real-ip
+    - request-id
+    - cors
+    - ip-restriction
+    - uri-blocker
+    - request-validation
+    - proxy-rewrite
+    - response-rewrite
+    - limit-req
+    - limit-conn
+    - prometheus
+    - http-logger
+    - file-logger
+
+# Routes Configuration for Plugin Demonstrations
+routes:
+  - uris:
+      - "/v2/shipping/fees/*"
+    name: Digital Order Processing (DOP) Shipping Fee Endpoint routing rules
+    plugins:
+      proxyRewrite:
+        scheme: https
+        regexUri:
+          - "^/v2/shipping/fees/(.*)"
+          - "/dop/v2/shipping/fees/${1}"
+      oidc:
+        enable: true
+        clientId: gateway-client
+        clientSecret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+        discovery: "https://iam.pp.demo.com/realms/core-apps/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/core-apps/protocol/openid-connect/token/introspect"
+        realm: core-apps
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+          - tenantId
+          - merchantId
+      request-id:
+        enable: true
+        header_name: "Unique-ID"
+    upstream:
+      nodes:
+        "oc-order-processor-service.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: pass
+
+  - uris:
+      - "/servicing/*"
+    name: GSM servicing routing rules
+    plugins:
+      proxyRewrite:
+        scheme: https
+        regexUri:
+          - "^/servicing/(.*)"
+          - "/servicing/${1}"
+      oidc:
+        enable: true
+        clientId: gateway-client
+        clientSecret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+        discovery: "https://iam.pp.demo.com/realms/core-apps/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/core-apps/protocol/openid-connect/token/introspect"
+        realm: core-apps
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+          - tenantId
+          - merchantId
+      request-id:
+        enable: true
+        header_name: "Unique-ID"
+    upstream:
+      nodes:
+        "gsm-service.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: pass
+
+  - uris:
+      - "/mrs/*"
+    name: Merchant Reporting Service (MRS) routing rules
+    plugins:
+      proxyRewrite:
+        scheme: https
+        regexUri:
+          - "^/mrs/(.*)"
+          - "/mrs/${1}"
+      oidc:
+        enable: true
+        clientId: gateway-client
+        clientSecret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+        discovery: "https://iam.pp.demo.com/realms/core-apps/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/core-apps/protocol/openid-connect/token/introspect"
+        realm: core-apps
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+          - tenantId
+          - merchantId
+      request-id:
+        enable: true
+        header_name: "Unique-ID"
+    upstream:
+      nodes:
+        "merchant-reporting-service.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: pass
+
+  - uris:
+      - "/v1/catalogs"
+      - "/v1/catalogs/*"
+    name: PIM catalog routing rules
+    plugins:
+      proxyRewrite:
+        scheme: https
+        regexUri:
+          - "^/v1/catalogs"
+          - "/v1/catalogs"
+          - "^/v1/catalogs/(.*)"
+          - "/v1/catalogs/${1}"
+      oidc:
+        enable: true
+        clientId: gateway-client
+        clientSecret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+        discovery: "https://iam.pp.demo.com/realms/core-apps/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/core-apps/protocol/openid-connect/token/introspect"
+        realm: core-apps
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+          - tenantId
+          - merchantId
+      request-id:
+        enable: true
+        header_name: "Unique-ID"
+    upstream:
+      nodes:
+        "product-catalog-service.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: pass
+
+  - uris:
+      - "/volumeOrderProcessing/*"
+    name: Volume Order Processing routing rules
+    plugins:
+      proxyRewrite:
+        scheme: https
+        regexUri:
+          - "^/volumeOrderProcessing/(.*)"
+          - "/volumeOrderProcessing/${1}"
+      oidc:
+        enable: true
+        clientId: gateway-client
+        clientSecret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+        discovery: "https://iam.pp.demo.com/realms/core-apps/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/core-apps/protocol/openid-connect/token/introspect"
+        realm: core-apps
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+          - tenantId
+          - merchantId
+      request-id:
+        enable: true
+        header_name: "Unique-ID"
+    upstream:
+      nodes:
+        "volume-order-processing.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: pass
+
+  - uris:
+      - "/orderservices/*"
+    name: Order Service routing rules
+    plugins:
+      proxyRewrite:
+        scheme: https
+        regexUri:
+          - "^/orderservices/(.*)"
+          - "/orderservices/${1}"
+      oidc:
+        enable: true
+        clientId: gateway-client
+        clientSecret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+        discovery: "https://iam.pp.demo.com/realms/core-apps/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/core-apps/protocol/openid-connect/token/introspect"
+        realm: core-apps
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+          - tenantId
+          - merchantId
+      request-id:
+        enable: true
+        header_name: "Unique-ID"
+    upstream:
+      nodes:
+        "oc-fms-order-service.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: pass
+
+  - uris:
+      - "/webhook-event-consumer/*"
+    name: webhook-event-consumer Routing Rules (HMAC Auth Demo)
+    plugins:
+      proxyRewrite:
+        regexUri:
+          - "^/webhook-event-consumer/(.*)"
+          - "/webhook/${1}"
+      hmac-auth-simple:
+        enable: true
+        secret_key: "R3p#9sKw9$Xv3!uB7zTq2LmNp@Df#8Qs"
+        algorithm: hmac-sha256
+        clock_skew: 300
+        validate_request_body: true
+      request-id:
+        enable: true
+        header_name: "X-Request-ID"
+      limit-req:
+        rate: 10
+        burst: 20
+        key_type: "ip"
+    upstream:
+      nodes:
+        "oc-webhook-service.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: pass
+      timeout:
+        connect: 6
+        send: 6
+        read: 6
+
+  - uris:
+      - "/eGiftProcessing/*"
+    name: DGS EGift Issuance Routing Rules
+    plugins:
+      proxyRewrite:
+        scheme: https
+        regexUri:
+          - "^/eGiftProcessing/(.*)"
+          - "/eGiftProcessing/${1}"
+      oidc:
+        enable: true
+        clientId: gateway-client
+        clientSecret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+        discovery: "https://iam.pp.demo.com/realms/core-apps/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/core-apps/protocol/openid-connect/token/introspect"
+        realm: core-apps
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+          - tenantId
+          - contractId
+      request-id:
+        enable: true
+        header_name: "Unique-ID"
+    upstream:
+      nodes:
+        "dgs-egift-issuance.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: pass
+
+  - uris:
+      - "/balanceInquiry/*"
+    name: DGS Balance Inquiry Routing Rules
+    plugins:
+      proxyRewrite:
+        regexUri:
+          - "^/balanceInquiry/(.*)"
+          - "/accountProcessing/${1}"
+      oidc:
+        enable: true
+        clientId: gateway-client
+        clientSecret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+        discovery: "https://iam.pp.demo.com/realms/core-apps/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/core-apps/protocol/openid-connect/token/introspect"
+        realm: core-apps
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+          - tenantId
+          - contractId
+      request-id:
+        enable: true
+        header_name: "Unique-ID"
+    upstream:
+      nodes:
+        "dgs-balance-inquiry.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: pass
+
+  - uris:
+      - "/accountProcessing/*"
+    name: DGS Account Processing Routing Rules
+    plugins:
+      proxyRewrite:
+        scheme: https
+        regexUri:
+          - "^/accountProcessing/(.*)"
+          - "/accountProcessing/${1}"
+      oidc:
+        enable: true
+        clientId: gateway-client
+        clientSecret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+        discovery: "https://iam.pp.demo.com/realms/core-apps/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/core-apps/protocol/openid-connect/token/introspect"
+        realm: core-apps
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+          - tenantId
+          - contractId
+      request-id:
+        enable: true
+        header_name: "Unique-ID"
+    upstream:
+      nodes:
+        "dgs-account-processing.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: pass
+
+  - uris:
+      - "/productCatalogManagement/*"
+    name: MD Product Catalog Management Routing Rules
+    plugins:
+      proxyRewrite:
+        regexUri:
+          - "^/productCatalogManagement/(.*)"
+          - "/productCatalogManagement/${1}"
+      oidc:
+        enable: true
+        clientId: gateway-client
+        clientSecret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+        discovery: "https://iam.pp.demo.com/realms/dev-experience/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/dev-experience/protocol/openid-connect/token/introspect"
+        realm: dev-experience
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+    upstream:
+      nodes:
+        "md-product-catalog-mgmt.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: node
+
+  - uris:
+      - "/productManagement/*"
+    name: MD Product Management Routing Rules
+    plugins:
+      proxyRewrite:
+        regexUri:
+          - "^/productManagement/(.*)"
+          - "/productManagement/${1}"
+      oidc:
+        enable: true
+        clientId: gateway-client
+        clientSecret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+        discovery: "https://iam.pp.demo.com/realms/dev-experience/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/dev-experience/protocol/openid-connect/token/introspect"
+        realm: dev-experience
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+    upstream:
+      nodes:
+        "md-product-mgmt.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: node
+
+  - uris:
+      - "/pim/api/*"
+      - "/pimcore-graphql-webservices/ProductInternal"
+      - "/assets/*"
+    name: pim routing rules.
+    plugins:
+      proxyRewrite:
+        regexUri:
+          - "^/pim/api/(.*)"
+          - "/pim/api/${1}"
+          - "^/pimcore-graphql-webservices/ProductInternal"
+          - "/pimcore-graphql-webservices/ProductInternal"
+          - "^/assets/(.*)"
+          - "/assets/${1}"
+    upstream:
+      nodes:
+        "pim.preprod.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: pass
+
+  - uris:
+      - "/bns/v2/*"
+    name: Blackhawk Notification Service (BNS-V2) routing rules
+    plugins:
+      proxyRewrite:
+        scheme: https
+        regexUri:
+          - "^/bns/v2/(.*)"
+          - "/bns/v2/${1}"
+      oidc:
+        enable: true
+        clientId: core-apps-gateway
+        clientSecret: mc4cDyIw8mMGVgHGTteRuPFs7mvH5fw8
+        discovery: "https://iam.pp.demo.com/realms/core-apps/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/core-apps/protocol/openid-connect/token/introspect"
+        realm: core-apps
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+    upstream:
+      nodes:
+        "blackhawk-notification-service.pp.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: node
+
+  - uris:
+      - "/push/v1/*"
+    name: Blackhawk Push Notification Service routing rules
+    plugins:
+      proxyRewrite:
+        scheme: https
+        regexUri:
+          - "^/push/v1/(.*)"
+          - "/push/v1/${1}"
+      oidc:
+        enable: true
+        clientId: core-apps-gateway
+        clientSecret: mc4cDyIw8mMGVgHGTteRuPFs7mvH5fw8
+        discovery: "https://iam.pp.demo.com/realms/core-apps/.well-known/openid-configuration"
+        introspectionEndpoint: "https://iam.pp.demo.com/realms/core-apps/protocol/openid-connect/token/introspect"
+        realm: core-apps
+      jwt:
+        enable: true
+        claims:
+          - certificateId
+    upstream:
+      nodes:
+        "emc-push-notification.pp.demo.com:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: node
+
+  # Demo routes for testing
+  - uri: /health
+    name: Health Check Route
+    plugins:
+      response-rewrite:
+        status_code: 200
+        body: '{"status": "healthy", "environment": "preprod", "version": "3.8.0"}'
+        headers:
+          Content-Type: "application/json"
+  
+  - uri: /demo/*
+    name: Demo API Route
+    plugins:
+      proxy-rewrite:
+        regex_uri: ["^/demo/(.*)", "/$1"]
+    upstream:
+      nodes:
+        "httpbin.org:443": 1
+      type: roundrobin
+      scheme: https
+      pass_host: node
+
+# SSL Configuration
+ssl:
+  - cert: |
+      -----BEGIN CERTIFICATE-----
+      MIIHFjCCBf6gAwIBAgIQB2DIpQztO7us5eogo4RN3TANBgkqhkiG9w0BAQsFADBZ
+      MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMTMwMQYDVQQDEypE
+      aWdpQ2VydCBHbG9iYWwgRzIgVExTIFJTQSBTSEEyNTYgMjAyMCBDQTEwHhcNMjQw
+      NDE5MDAwMDAwWhcNMjUwNDE4MjM1OTU5WjCBkDELMAkGA1UEBhMCVVMxEzARBgNV
+      BAgTCkNhbGlmb3JuaWExEzARBgNVBAcTClBsZWFzYW50b24xKDAmBgNVBAoTH0Js
+      YWNraGF3ayBOZXR3b3JrIEhvbGRpbmdzLCBJbmMxLTArBgNVBAMTJGFwaS1zYW5k
+      Ym94LnBvc3Rwcm9kdWN0aW9uLmJobi5jYXJkczCCASIwDQYJKoZIhvcNAQEBBQAD
+      ggEPADCCAQoCggEBAMh1Sbkz96QIjX9LcLTU4ER0bz1sZdx64Dpry0CyFQb+i+wo
+      -----END CERTIFICATE-----
+    key: |
+      -----BEGIN PRIVATE KEY-----
+      MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDIdUm5M/ekCI1/
+      S3C01OBEdG89bGXceuA6a8tAshUG/ovsKOP05CWkCyiN8XiRmKWgALBA4U8bH0J4
+      -----END PRIVATE KEY-----
+    snis:
+      - "apisix-preprod.demo.com"
+
+# Health Route Configuration
+Healthroutes:
+  uri: "/health"
+  upstream:
+    nodes:
+      "httpbin.org:443": 1
+    type: roundrobin
+    scheme: https
+    pass_host: node
+  plugins:
+    proxyRewrite:
+      uri: "/status/200"
+      use_real_request_uri_unsafe: false
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    path: /apisix/prometheus/metrics
+    port: 9080

@@ -1,0 +1,160 @@
+# Default values for apisix-standalone.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Global settings
+nameOverride: ""
+fullnameOverride: ""
+
+# Environment Configuration
+environment: ""
+namespace: ""
+
+# AWS Configuration  
+aws:
+  region: us-east-1
+  accountId: ""
+
+# Application Configuration
+app:
+  name: apisix-gateway
+  version: "3.8.0"
+
+# Service Account
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# Deployment Configuration
+deployment:
+  replicas: 2
+  
+  image:
+    repository: ""
+    pullPolicy: Always
+    tag: ""
+  
+  imagePullSecrets: []
+  
+  ports:
+    http: 9080
+    https: 9443
+    admin: 9180
+  
+  # Security Context
+  podSecurityContext:
+    fsGroup: 2000
+  
+  securityContext:
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: false
+    runAsNonRoot: true
+    runAsUser: 1000
+  
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  
+  # Health checks
+  livenessProbe:
+    httpGet:
+      path: /apisix/admin/status
+      port: 9180
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  
+  readinessProbe:
+    httpGet:
+      path: /apisix/admin/status
+      port: 9180
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Service Configuration
+service:
+  type: ClusterIP
+  annotations: {}
+  
+  http:
+    port: 9080
+    targetPort: 9080
+  
+  https:
+    port: 9443
+    targetPort: 9443
+  
+  admin:
+    port: 9180
+    targetPort: 9180
+
+# Ingress Configuration
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+  
+  hosts: []
+  tls: []
+
+# ConfigMap Configuration
+configMap:
+  adminKey: ""
+  plugins:
+    - datadome-protect
+    - jwt-header-plugin
+    - pci-tokenization-plugin
+    - hmac-auth-simple
+    - openid-connect-multi-realm
+    - real-ip
+    - request-id
+    - cors
+    - ip-restriction
+    - uri-blocker
+    - request-validation
+    - proxy-rewrite
+    - response-rewrite
+    - limit-req
+    - limit-conn
+    - prometheus
+    - http-logger
+    - file-logger
+
+# Routes Configuration
+routes: []
+
+# SSL Configuration
+ssl: []
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    path: /apisix/prometheus/metrics
+    port: 9080

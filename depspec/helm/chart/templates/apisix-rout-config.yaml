@@ -1,0 +1,270 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "apisix-standalone.fullname" . }}-routes
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "apisix-standalone.labels" . | nindent 4 }}
+  annotations:
+    config.kubernetes.io/change-cause: "Trigger an update"
+data:
+  apisix.yaml: |
+    {{- if .Values.ssl }}
+    ssls:
+      {{- range .Values.ssl }}
+      -
+        cert: |
+          {{ .cert | nindent 10 }}
+        key: |
+          {{ .key | nindent 10 }}
+        snis:
+          {{- range .snis }}
+          - {{ . | quote }}
+          {{- end }}
+      {{- end }}
+    {{- end }}
+
+    global_rules:
+      -
+        id: 1
+        plugins:
+          datadome-protect:
+            datadome_server_side_key: "nBCXyor6aStwIKX"
+            # put the right key, else it will not work.
+          response-rewrite:
+            body: '{"code":"401","message":"Authorization Required"}'
+            vars:
+              - - status
+                - "=="
+                - 401
+      -
+        id: 100
+        plugins:
+          early-4xx-request-logger:
+            enable: true
+            max_body_bytes: 8192
+            log_all_headers: false
+            redact_headers:
+              - Authorization
+              - Cookie
+              - Set-Cookie
+              - X-Api-Key
+            redact_body_json_keys:
+              - password
+              - secret
+              - apiKey
+              - token
+              - access_token
+              - refresh_token
+            redact_body_patterns:
+              - '(?i)"cardNumber"\s*:\s*"[0-9]{8,19}"'
+              - '(?i)"cvv"\s*:\s*"?[0-9]{3,4}"?'
+              - '(?i)"ssn"\s*:\s*"?[0-9]{3}-?[0-9]{2}-?[0-9]{4}"?'
+            redact_marker: '***REDACTED***'
+            log_level: warn
+            sample: 1
+            include_upstream_4xx: true
+            include_upstream_5xx: true
+            include_gateway_5xx: true
+            classify_5xx_causes: true
+            output_mode: summary
+            header_allowlist:
+              - host
+              - user-agent
+              - x-forwarded-for
+              - x-amzn-trace-id
+            omit_body: false
+            add_timestamp: true
+            capture_args: false
+            log_body_in_summary: true
+            log_body_methods:
+              - POST
+              - PUT
+              - PATCH
+            field_allowlist:
+              - reason
+              - status
+              - method
+              - uri
+              - original_uri
+              - host
+              - client_ip
+              - request_id
+              - tenant_id
+              - timeout
+              - cause
+              - correlation_id
+              - body
+
+    consumers:
+      {{- range .Values.routes }}
+      {{- if hasKey (index . "plugins") "hmac-auth" }}
+      -
+        username: {{ index (index .plugins "hmac-auth") "username" | quote }}
+        plugins:
+          hmac-auth:
+            enable: true
+            access_key: {{ index (index .plugins "hmac-auth") "access_key" | quote }}
+            secret_key: {{ index (index .plugins "hmac-auth") "secret_key" | quote }}
+            algorithm: {{ index (index .plugins "hmac-auth") "algorithm" | quote }}
+      {{- end }}
+      {{- end }}
+    routes:
+    {{- range .Values.routes }}
+      -
+        uris:
+          {{- range .uris }}
+          - {{ . | quote }}
+          {{- end }}
+        name: {{ .name }}
+        plugins:
+          {{- if hasKey .plugins "proxy-rewrite" }}
+          proxy-rewrite:
+            {{- if hasKey (index .plugins "proxy-rewrite") "regex_uri" }}
+            regex_uri:
+              {{- range (index .plugins "proxy-rewrite" "regex_uri") }}
+              - {{ . | quote }}
+              {{- end }}
+            {{- end }}
+            {{- if hasKey (index .plugins "proxy-rewrite") "scheme" }}
+            scheme: {{ index .plugins "proxy-rewrite" "scheme" }}
+            {{- end }}
+          {{- end }}
+          {{- if hasKey .plugins "oidc" }}
+          openid-connect:
+            enable: {{ .plugins.oidc.enable | default "false" }}
+            bearer_only: true
+            client_id: {{ .plugins.oidc.clientId | default "gateway-client" }}
+            client_secret: {{ .plugins.oidc.clientSecret | default "IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd" }}
+            discovery: {{ .plugins.oidc.discovery | default "https://iam.pp.bhn.cards/realms/dev-experience/.well-known/openid-configuration" }}
+            introspection_endpoint: {{ .plugins.oidc.introspectionEndpoint | default "https://iam.pp.bhn.cards/realms/dev-experience/protocol/openid-connect/token/introspect" }}
+            realm: {{ .plugins.oidc.realm | default "core-apps" }}
+            set_userinfo_header: true
+          {{- end }}
+          {{- if hasKey .plugins "jwt" }}
+          jwt-header-plugin:
+            enable: {{ .plugins.jwt.enable | default "false" }}
+            {{- if hasKey .plugins.jwt "claims" }}
+            keys:
+              {{- range $header := .plugins.jwt.claims}}
+              - "{{ $header }}"
+              {{- end -}}
+            {{- end -}}
+          {{- end }}
+          {{- if hasKey .plugins "request-id" }}
+          request-id:
+            enable: true
+            header_name: {{ index .plugins "request-id" "header_name" | default "Unique-ID" | quote }}
+          {{- end }}
+          {{- if hasKey .plugins "hmac-auth" }}
+          hmac-auth:
+            enable: {{ index (index .plugins "hmac-auth") "enable" | default "false" }}
+            access_key: {{ index (index .plugins "hmac-auth") "access_key" | quote }}
+            secret_key: {{ index (index .plugins "hmac-auth") "secret_key" | quote }}
+            algorithm: {{ index (index .plugins "hmac-auth") "algorithm" | quote }}
+            {{- if hasKey (index .plugins "hmac-auth") "clock_skew" }}
+            clock_skew: {{ index (index .plugins "hmac-auth") "clock_skew" }}
+            {{- end }}
+            {{- if hasKey (index .plugins "hmac-auth") "validate_request_body" }}
+            validate_request_body: {{ index (index .plugins "hmac-auth") "validate_request_body" }}
+            {{- end }}
+          {{- end }}
+          {{- if hasKey .plugins "hmac-auth-simple" }}
+          hmac-auth-simple:
+            enable: {{ index .plugins "hmac-auth-simple" "enable" | default "true" }}
+            secret_key: {{ index .plugins "hmac-auth-simple" "secret_key" | quote }}
+            algorithm: {{ index .plugins "hmac-auth-simple" "algorithm" | default "hmac-sha256" }}
+            {{- if index .plugins "hmac-auth-simple" "clock_skew" }}
+            clock_skew: {{ index .plugins "hmac-auth-simple" "clock_skew" }}
+            {{- end }}
+            {{- if index .plugins "hmac-auth-simple" "validate_request_body" }}
+            validate_request_body: {{ index .plugins "hmac-auth-simple" "validate_request_body" }}
+            {{- end }}
+          {{- end }}
+          {{- if hasKey .plugins "limit-req" }}
+          limit-req:
+            rate: {{ index .plugins "limit-req" "rate" | default 10 }}
+            burst: {{ index .plugins "limit-req" "burst" | default 20 }}
+            key_type: {{ index .plugins "limit-req" "key_type" | default "ip" | quote }}
+          {{- end }}
+        {{- if .upstream }}
+        upstream:
+          nodes:
+            {{- range $key, $value := .upstream.nodes }}
+            {{ $key | quote }}: {{ $value }}
+            {{- end }}
+          type: {{ .upstream.type }}
+          scheme: {{ .upstream.scheme }}
+          pass_host: {{ .upstream.pass_host }}
+        {{- end }}
+      {{- end }}
+      - 
+        uris:
+          - "/health.html"
+        name: default health check
+        plugins:
+          response-rewrite:
+            body: "up"
+            status_code: 200
+      {{- if .Values.Healthroutes }}
+      -
+        uri: {{ .Values.Healthroutes.uri | quote }}
+        upstream:
+          nodes:
+    {{- range $key, $value := .Values.Healthroutes.upstream.nodes }}
+            {{ $key | quote }}: {{ $value }}
+    {{- end }}
+          type: {{ .Values.Healthroutes.upstream.type }}
+          scheme: {{ .Values.Healthroutes.upstream.scheme }}
+          pass_host: {{ .Values.Healthroutes.upstream.pass_host }}
+          timeout:
+            connect: 6
+            send: 6
+            read: 6
+        plugins:
+          proxy-rewrite:
+        {{- if hasKey .Values.Healthroutes.plugins "proxyRewrite" }}
+          {{- if .Values.Healthroutes.plugins.proxyRewrite.uri }}
+        uri: {{ .Values.Healthroutes.plugins.proxyRewrite.uri | quote }}
+          {{- else }}
+        uri: "/health.html"
+          {{- end }}
+        use_real_request_uri_unsafe: {{ .Values.Healthroutes.plugins.proxyRewrite.use_real_request_uri_unsafe | default false }}
+        {{- else }}
+        uri: "/health.html"
+        use_real_request_uri_unsafe: false
+        {{- end }}
+      {{- end }}
+      -
+        uri: /blmock/*
+        upstream:
+          nodes:
+            "bloom-order-postproduction-green.postprod.bhn.cards:443": 1
+          type: roundrobin
+          scheme: https
+          pass_host: node
+          timeout:
+            connect: 6
+            send: 6
+            read: 6
+        plugins:
+          openid-connect:
+            bearer_only: true
+            client_id: gateway-client
+            client_secret: IgQMXK9bDmM81UkiluKiBzXUpVUpEZbd
+            discovery: https://iam.pp.bhn.cards/realms/dev-experience/.well-known/openid-configuration
+            introspection_endpoint: https://iam.pp.bhn.cards/realms/dev-experience/protocol/openid-connect/token/introspect
+            realm: core-apps
+            scope: openid
+            set_access_token_header: true
+            set_id_token_header: true
+            set_refresh_token_header: false
+            set_userinfo_header: true
+            ssl_verify: false  
+          proxy-rewrite:
+            regex_uri:
+            - "^/blmock/(.*)"
+            - "/${1}"
+            use_real_request_uri_unsafe: false
+
+     #END

@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "apisix-standalone.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "apisix-standalone.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.deployment.replicas }}
+  selector:
+    matchLabels:
+      {{- include "apisix-standalone.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "apisix-standalone.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/apisix-configmap.yaml") . | sha256sum }}
+        checksum/routes: {{ include (print $.Template.BasePath "/apisix-rout-config.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.deployment.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "apisix-standalone.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.deployment.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: copy-config
+          image: {{ .Values.deployment.image.repository }}:{{ .Values.deployment.image.tag | default .Chart.AppVersion }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              cp /temp/config.yaml /usr/local/apisix/conf/ && 
+              cp /temp/apisix.yaml /usr/local/apisix/conf/ && 
+              chmod 644 /usr/local/apisix/conf/config.yaml /usr/local/apisix/conf/apisix.yaml
+          volumeMounts:
+          - name: apisix-config
+            mountPath: /temp/config.yaml
+            subPath: config.yaml
+          - name: routes-config
+            mountPath: /temp/apisix.yaml
+            subPath: apisix.yaml
+          - name: apisix-config-volume
+            mountPath: /usr/local/apisix/conf/
+          securityContext:
+            {{- toYaml .Values.deployment.securityContext | nindent 12 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.deployment.securityContext | nindent 12 }}
+          image: "{{ .Values.deployment.image.repository }}:{{ .Values.deployment.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.deployment.image.pullPolicy }}
+          env:
+            - name: APISIX_STAND_ALONE
+              value: "true"
+          ports:
+            - name: http
+              containerPort: {{ .Values.deployment.ports.http }}
+              protocol: TCP
+            - name: https
+              containerPort: {{ .Values.deployment.ports.https }}
+              protocol: TCP
+            - name: admin
+              containerPort: {{ .Values.deployment.ports.admin }}
+              protocol: TCP
+          {{- if .Values.deployment.livenessProbe }}
+          livenessProbe:
+            {{- toYaml .Values.deployment.livenessProbe | nindent 12 }}
+          {{- end }}
+          {{- if .Values.deployment.readinessProbe }}
+          readinessProbe:
+            {{- toYaml .Values.deployment.readinessProbe | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.deployment.resources | nindent 12 }}
+          volumeMounts:
+            - name: apisix-config-volume
+              mountPath: /usr/local/apisix/conf/config.yaml
+              subPath: config.yaml
+            - name: apisix-config-volume
+              mountPath: /usr/local/apisix/conf/apisix.yaml
+              subPath: apisix.yaml
+            - name: ca-certificates
+              mountPath: /usr/local/apisix/conf/ca-certificates.crt
+              subPath: ca-certificates.crt
+      volumes:
+        - name: apisix-config
+          configMap:
+            name: {{ include "apisix-standalone.fullname" . }}-config
+        - name: routes-config
+          configMap:
+            name: {{ include "apisix-standalone.fullname" . }}-routes
+        - name: apisix-config-volume
+          emptyDir: {}
+        - name: ca-certificates
+          configMap:
+            name: {{ include "apisix-standalone.fullname" . }}-ca-cert
+      {{- with .Values.deployment.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.deployment.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.deployment.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

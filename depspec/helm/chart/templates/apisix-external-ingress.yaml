@@ -1,0 +1,33 @@
+{{- if .Values.exIngress }}
+{{- if .Values.exIngress.certificateARNs }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.exIngress.certificateARNs | join "," }}
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/backend-protocol: HTTPS
+    alb.ingress.kubernetes.io/target-group-attributes: stickiness.enabled=true,stickiness.lb_cookie.duration_seconds=60
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /health.html
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS-1-2-2017-01
+    external-dns.alpha.kubernetes.io/hostname: {{ .Values.exIngress.externaldns }}
+    alb.ingress.kubernetes.io/actions.rule-path1: >
+      {"type":"fixed-response","fixedResponseConfig":{"contentType":"text/html","statusCode":"404","messageBody":"<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The requested URL was not found on this server.</p></body></html>"}}
+  name: apisix-sandbox-ingress-external
+  namespace: {{ .Values.namespace }}
+spec:
+  ingressClassName: alb
+  rules:
+  - http:
+      paths:
+      - backend:
+          service:
+            name: {{ .Values.service.name }}
+            port:
+              number: {{ .Values.service.https.port }}
+        path: /*
+        pathType: ImplementationSpecific
+{{- end }}
+{{- end }}

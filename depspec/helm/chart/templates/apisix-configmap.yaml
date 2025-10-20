@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "apisix-standalone.fullname" . }}-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "apisix-standalone.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- include "apisix-standalone.config" . | nindent 4 }}
+      - request-validation             # priority: 2800
+      - chaitin-waf                    # priority: 2700
+      - openid-connect                 # priority: 2599
+      - cas-auth                       # priority: 2597
+      - authz-casbin                   # priority: 2560
+      - authz-casdoor                  # priority: 2559
+      - wolf-rbac                      # priority: 2555
+      - ldap-auth                      # priority: 2540
+      - hmac-auth                      # priority: 2530
+      - basic-auth                     # priority: 2520
+      - jwt-auth                       # priority: 2510
+      - key-auth                       # priority: 2500
+      - consumer-restriction           # priority: 2400
+      - forward-auth                   # priority: 2002
+      - opa                            # priority: 2001
+      - authz-keycloak                 # priority: 2000
+      - proxy-cache                    # priority: 1085
+      - body-transformer               # priority: 1080
+      - proxy-mirror                   # priority: 1010
+      - proxy-rewrite                  # priority: 1008
+      - workflow                       # priority: 1006
+      - api-breaker                    # priority: 1005
+      - limit-conn                     # priority: 1003
+      - limit-count                    # priority: 1002
+      - limit-req                      # priority: 1001
+      - gzip                           # priority: 995
+      - server-info                    # priority: 990
+      - traffic-split                  # priority: 966
+      - redirect                       # priority: 900
+      - response-rewrite               # priority: 899
+      - public-api                     # priority: 501
+      - prometheus                     # priority: 500
+      - sls-logger                     # priority: 406
+      - tcp-logger                     # priority: 405
+      - syslog                         # priority: 401
+      - udp-logger                     # priority: 400
+      - aws-lambda                     # priority: -1899
+      - openwhisk                      # priority: -1901
+      - openfunction                   # priority: -1902
+      - serverless-post-function       # priority: -2000
+      - ext-plugin-post-req            # priority: -3000
+      - ext-plugin-post-resp           # priority: -4000
